@@ -425,7 +425,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
 		TraceEvent("TLogBytesWhenRemoved", tli.id()).detail("sharedBytesInput", tLogData->bytesInput).detail("sharedBytesDurable", tLogData->bytesDurable).detail("localBytesInput", bytesInput.getValue()).detail("localBytesDurable", bytesDurable.getValue());
 
-		ASSERT(tLogData->bytesDurable <= tLogData->bytesInput);
+		ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
 		endRole(tli.id(), "TLog", "Error", true);
 
 		if(!tLogData->terminated) {
@@ -589,6 +589,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	if(logData->stopped) {
 		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD) {
 			while(logData->persistentDataDurableVersion != logData->version.get()) {
+				totalSize = 0;
 				std::vector<std::pair<std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator, std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator>> iters;
 				for(auto tag = logData->tag_data.begin(); tag != logData->tag_data.end(); ++tag)
 					iters.push_back(std::make_pair(tag->value.version_messages.begin(), tag->value.version_messages.end()));
