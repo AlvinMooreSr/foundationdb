@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
 Ruby bindings for the FoundationDB database.
 
 Complete documentation of the FoundationDB Ruby API can be found at:
-https://www.foundationdb.org/documentation/api-ruby.html.
+https://apple.github.io/foundationdb/api-ruby.html.
 EOF
   s.authors = ["FoundationDB"]
   s.email = 'fdb-dist@apple.com'
@@ -18,5 +18,5 @@ EOF
   s.license = 'Apache v2'
   s.add_dependency('ffi', '>= 1.1.5')
   s.required_ruby_version = '>= 1.9.3'
-  s.requirements << 'These bindings require the FoundationDB client. The client can be obtained from https://www.foundationdb.org/downloads/fdb-c/.'
+  s.requirements << 'These bindings require the FoundationDB client. The client can be obtained from https://www.foundationdb.org/download/.'
 end

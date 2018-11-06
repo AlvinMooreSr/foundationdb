@@ -717,7 +717,7 @@ namespace fileBackup {
 		return Void();
 	}
 
-	ACTOR static Future<Void> abortOldBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, std::string tagName) {
+	ACTOR static Future<Void> abortFiveZeroBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, std::string tagName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -761,7 +761,7 @@ namespace fileBackup {
 		return Void();
 	}
 
-	struct AbortOldBackupTask : TaskFuncBase {
+	struct AbortFiveZeroBackupTask : TaskFuncBase {
 		static StringRef name;
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state FileBackupAgent backupAgent;
@@ -772,14 +772,14 @@ namespace fileBackup {
 			TraceEvent(SevInfo, "FileBackupCancelOldTask")
 					.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
 					.detail("tagName", tagName);
-			Void _ = wait(abortOldBackup(&backupAgent, tr, tagName));
+			Void _ = wait(abortFiveZeroBackup(&backupAgent, tr, tagName));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
 		virtual StringRef getName() const {
-			TraceEvent(SevError, "FileBackupError").detail("cause", "AbortOldBackupTaskFunc::name() should never be called");
+			TraceEvent(SevError, "FileBackupError").detail("cause", "AbortFiveZeroBackupTaskFunc::name() should never be called");
 			ASSERT(false);
 			return StringRef();
 		}
@@ -787,16 +787,86 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef AbortOldBackupTask::name = LiteralStringRef("abort_legacy_backup");
-	REGISTER_TASKFUNC(AbortOldBackupTask);
-	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_diff_logs);
-	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_log_range);
-	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_logs);
-	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_range);
-	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_restorable);
-	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_finish_full_backup);
-	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_finished_full_backup);
-	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_start_full_backup);
+	StringRef AbortFiveZeroBackupTask::name = LiteralStringRef("abort_legacy_backup");
+	REGISTER_TASKFUNC(AbortFiveZeroBackupTask);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_backup_diff_logs);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_backup_log_range);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_backup_logs);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_backup_range);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_backup_restorable);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_finish_full_backup);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_finished_full_backup);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_start_full_backup);
+
+	ACTOR static Future<Void> abortFiveOneBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, std::string tagName) {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		state KeyBackedTag tag = makeBackupTag(tagName);
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
+
+		state BackupConfig config(current.first);
+		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+
+		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
+			throw backup_unneeded();
+		}
+
+		TraceEvent(SevInfo, "FBA_abortFileOneBackup")
+				.detail("tagName", tagName.c_str())
+				.detail("status", BackupAgentBase::getStateText(status));
+
+		// Cancel backup task through tag
+		Void _ = wait(tag.cancel(tr));
+
+		Key configPath = uidPrefixKey(logRangesRange.begin, config.getUid());
+		Key logsPath = uidPrefixKey(backupLogKeys.begin, config.getUid());
+
+		tr->clear(KeyRangeRef(configPath, strinc(configPath)));
+		tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+
+		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
+
+		return Void();
+	}
+
+	struct AbortFiveOneBackupTask : TaskFuncBase {
+		static StringRef name;
+		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+			state FileBackupAgent backupAgent;
+			state BackupConfig config(task);
+			state std::string tagName = wait(config.tag().getOrThrow(tr));
+
+			TEST(true);  // Canceling 5.1 backup task
+
+			TraceEvent(SevInfo, "FileBackupCancelFiveOneTask")
+					.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
+					.detail("tagName", tagName);
+			Void _ = wait(abortFiveOneBackup(&backupAgent, tr, tagName));
+
+			Void _ = wait(taskBucket->finish(tr, task));
+			return Void();
+		}
+
+		virtual StringRef getName() const {
+			TraceEvent(SevError, "FileBackupError").detail("cause", "AbortFiveOneBackupTaskFunc::name() should never be called");
+			ASSERT(false);
+			return StringRef();
+		}
+
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+	};
+	StringRef AbortFiveOneBackupTask::name = LiteralStringRef("abort_legacy_backup_5.2");
+	REGISTER_TASKFUNC(AbortFiveOneBackupTask);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_write_range);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_dispatch_ranges);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_write_logs);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_erase_logs);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_dispatch_logs);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_finished);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_write_snapshot_manifest);
+	REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_start);
 
 	std::function<void(Reference<Task>)> NOP_SETUP_TASK_FN = [](Reference<Task> task) { /* NOP */ };
 	ACTOR static Future<Key> addBackupTask(StringRef name,
@@ -1137,7 +1207,7 @@ namespace fileBackup {
 		}
 
 	};
-	StringRef BackupRangeTaskFunc::name = LiteralStringRef("file_backup_write_range");
+	StringRef BackupRangeTaskFunc::name = LiteralStringRef("file_backup_write_range_5.2");
 	const uint32_t BackupRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupRangeTaskFunc);
 
@@ -1620,7 +1690,7 @@ namespace fileBackup {
 		}
 
 	};
-	StringRef BackupSnapshotDispatchTask::name = LiteralStringRef("file_backup_dispatch_ranges");
+	StringRef BackupSnapshotDispatchTask::name = LiteralStringRef("file_backup_dispatch_ranges_5.2");
 	const uint32_t BackupSnapshotDispatchTask::version = 1;
 	REGISTER_TASKFUNC(BackupSnapshotDispatchTask);
 
@@ -1816,7 +1886,7 @@ namespace fileBackup {
 		}
 	};
 
-	StringRef BackupLogRangeTaskFunc::name = LiteralStringRef("file_backup_write_logs");
+	StringRef BackupLogRangeTaskFunc::name = LiteralStringRef("file_backup_write_logs_5.2");
 	const uint32_t BackupLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupLogRangeTaskFunc);
 
@@ -1841,30 +1911,25 @@ namespace fileBackup {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 			Void _ = wait(checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version));
 
-			state Version beginVersion = Params.beginVersion().get(task);
 			state Version endVersion = Params.endVersion().get(task);
 			state Key destUidValue = Params.destUidValue().get(task);
 
 			state BackupConfig config(task);
 			state Key logUidValue = config.getUidAsKey();
 
-			if (beginVersion == 0) {
-				Void _ = wait(eraseLogData(cx, logUidValue, destUidValue));
-			} else {
-				Void _ = wait(eraseLogData(cx, logUidValue, destUidValue, Optional<Version>(beginVersion), Optional<Version>(endVersion)));
-			}
+			Void _ = wait(eraseLogData(cx, logUidValue, destUidValue, endVersion != 0 ? Optional<Version>(endVersion) : Optional<Version>()));
 
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, UID logUid, TaskCompletionKey completionKey, Key destUidValue, Version beginVersion = 0, Version endVersion = 0, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, UID logUid, TaskCompletionKey completionKey, Key destUidValue, Version endVersion = 0, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key key = wait(addBackupTask(EraseLogRangeTaskFunc::name,
 										 EraseLogRangeTaskFunc::version,
 										 tr, taskBucket, completionKey,
 										 BackupConfig(logUid),
 										 waitFor,
 										 [=](Reference<Task> task) {
-											 Params.beginVersion().set(task, beginVersion);
+											 Params.beginVersion().set(task, 1); //FIXME: remove in 6.X, only needed for 5.2 backward compatibility
 											 Params.endVersion().set(task, endVersion);
 											 Params.destUidValue().set(task, destUidValue);
 										 },
@@ -1885,7 +1950,7 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("file_backup_erase_logs");
+	StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("file_backup_erase_logs_5.2");
 	const uint32_t EraseLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(EraseLogRangeTaskFunc);
 
@@ -1969,7 +2034,7 @@ namespace fileBackup {
 			// Do not erase at the first time
 			if (prevBeginVersion > 0) {
 				state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
-				Key _ = wait(EraseLogRangeTaskFunc::addTask(tr, taskBucket, config.getUid(), TaskCompletionKey::joinWith(logDispatchBatchFuture), destUidValue, prevBeginVersion, beginVersion));
+				Key _ = wait(EraseLogRangeTaskFunc::addTask(tr, taskBucket, config.getUid(), TaskCompletionKey::joinWith(logDispatchBatchFuture), destUidValue, beginVersion));
 			}
 
 			Void _ = wait(taskBucket->finish(tr, task));
@@ -2002,7 +2067,7 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef BackupLogsDispatchTask::name = LiteralStringRef("file_backup_dispatch_logs");
+	StringRef BackupLogsDispatchTask::name = LiteralStringRef("file_backup_dispatch_logs_5.2");
 	const uint32_t BackupLogsDispatchTask::version = 1;
 	REGISTER_TASKFUNC(BackupLogsDispatchTask);
 
@@ -2042,7 +2107,7 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef FileBackupFinishedTask::name = LiteralStringRef("file_backup_finished");
+	StringRef FileBackupFinishedTask::name = LiteralStringRef("file_backup_finished_5.2");
 	const uint32_t FileBackupFinishedTask::version = 1;
 	REGISTER_TASKFUNC(FileBackupFinishedTask);
 
@@ -2199,7 +2264,7 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef BackupSnapshotManifest::name = LiteralStringRef("file_backup_write_snapshot_manifest");
+	StringRef BackupSnapshotManifest::name = LiteralStringRef("file_backup_write_snapshot_manifest_5.2");
 	const uint32_t BackupSnapshotManifest::version = 1;
 	REGISTER_TASKFUNC(BackupSnapshotManifest);
 
@@ -2285,7 +2350,7 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef StartFullBackupTaskFunc::name = LiteralStringRef("file_backup_start");
+	StringRef StartFullBackupTaskFunc::name = LiteralStringRef("file_backup_start_5.2");
 	const uint32_t StartFullBackupTaskFunc::version = 1;
 	REGISTER_TASKFUNC(StartFullBackupTaskFunc);
 
@@ -2802,7 +2867,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", Params.beginFile().get(task))
+						.detail("BeginFile", printable(Params.beginFile().get(task)))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
@@ -2816,7 +2881,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", Params.beginFile().get(task))
+						.detail("BeginFile", printable(Params.beginFile().get(task)))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("RestoreVersion", restoreVersion)
 						.detail("ApplyLag", applyLag)
@@ -2830,7 +2895,7 @@ namespace fileBackup {
 					TraceEvent("FileRestoreDispatch")
 						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
-						.detail("BeginFile", Params.beginFile().get(task))
+						.detail("BeginFile", printable(Params.beginFile().get(task)))
 						.detail("BeginBlock", Params.beginBlock().get(task))
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "restore_complete")
@@ -2938,7 +3003,7 @@ namespace fileBackup {
 				TraceEvent("FileRestoreDispatch")
 					.detail("RestoreUID", restore.getUid())
 					.detail("BeginVersion", beginVersion)
-					.detail("BeginFile", Params.beginFile().get(task))
+					.detail("BeginFile", printable(Params.beginFile().get(task)))
 					.detail("BeginBlock", Params.beginBlock().get(task))
 					.detail("EndVersion", endVersion)
 					.detail("ApplyLag", applyLag)
@@ -2984,7 +3049,7 @@ namespace fileBackup {
 			TraceEvent("FileRestoreDispatch")
 				.detail("RestoreUID", restore.getUid())
 				.detail("BeginVersion", beginVersion)
-				.detail("BeginFile", Params.beginFile().get(task))
+				.detail("BeginFile", printable(Params.beginFile().get(task)))
 				.detail("BeginBlock", Params.beginBlock().get(task))
 				.detail("EndVersion", endVersion)
 				.detail("ApplyLag", applyLag)
@@ -3411,8 +3476,8 @@ public:
 				tr->set(destUidLookupPath, destUidValue);
 			}
 		}
-		Version initVersion = 1;
-		tr->set(config.getUidAsKey().withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix), BinaryWriter::toValue<Version>(initVersion, Unversioned()));
+
+		tr->set(config.getUidAsKey().withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix), BinaryWriter::toValue<Version>(tr->getReadVersion().get(), Unversioned()));
 		config.destUidValue().set(tr, destUidValue);
 
 		// Point the tag to this new uid

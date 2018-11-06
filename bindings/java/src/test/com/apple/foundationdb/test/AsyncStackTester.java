@@ -317,8 +317,8 @@ public class AsyncStackTester {
 					if(t != null) {
 						inst.context.newTransaction(oldTr); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 					}
-					else {
-						inst.setTransaction(oldTr, tr);
+					else if(!inst.setTransaction(oldTr, tr)) {
+						tr.close();
 					}
 				}).thenApply(v -> null);
 
@@ -479,7 +479,6 @@ public class AsyncStackTester {
 				tr.options().setReadYourWritesDisable();
 				tr.options().setReadSystemKeys();
 				tr.options().setAccessSystemKeys();
-				tr.options().setDurabilityDevNullIsWebScale();
 				tr.options().setTimeout(60*1000);
 				tr.options().setRetryLimit(50);
 				tr.options().setMaxRetryDelay(100);

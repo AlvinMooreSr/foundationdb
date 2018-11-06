@@ -31,7 +31,8 @@ extensions = [
     'sphinx.ext.todo',
     'sphinx.ext.ifconfig',
     'brokenrole',
-    'relativelink'
+    'relativelink',
+    'sphinxcontrib.rubydomain'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -48,8 +49,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'FoundationDB'
-copyright = u'2015 Apple, Inc.  All Rights Reserved.'
-author = u"Stephen Pimentel"
+copyright = u'2013-2018 Apple, Inc and the FoundationDB project authors'
 
 # Load the version information from 'versions.target'
 import xml.etree.ElementTree as ET
